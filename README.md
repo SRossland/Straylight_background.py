@@ -18,7 +18,9 @@ NOTE:
 # line 239: detmap[A/B].fits. This file is given in this hub, just need to have the path point to where you store it
 # line 251: pixmap[A/B].fits. This file is given in this hub, it is ALSO given in the nuskybgd auxil, however, this one is more up-to-date
 # line 493: normmeanvals.txt. This file is given in this hub and contains an initial value for norm fitting. This could be changed in the future.
-
+==============================================
+# There is an extra file you may need if you do not have nuskbgd locally (which is what the nusky_dir path is there for). det[A/B]_det1.img
+==============================================
 # Syntax:
 #   count_stat_crab.py telescope[A/B]
 #   fits_file (Data fits file in DET1 coords.)
