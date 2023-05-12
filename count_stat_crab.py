@@ -2,29 +2,13 @@
 
 # syntax: count_stat_new.py det file lowenergy highenergy sun/nosun/full
 
-# Finds the statistics of an image for Mi,j = a*Ai,j + b1*a0 + b2*a1 + b3*a2 + b4*a3 + Cn*c0, where M is the model value, A is the physical location of the pixel, a is a variable to find, a#'s are the base values of the individual dets with b being the norm, and Cn in the crab norm with c0 being the bin representation.
+# Finds the statistics of an image for Mi,j = a*Ai,j + b1*a0 + b2*a1 + b3*a2 + b4*a3 + Cn*c0, where M is the model value, A is the physical location of the pixel, a is a variable to find, a#'s are the base values of the individual dets with b being the norm tied the detector of choice, and Cn in the straylight norm with c0 being the bin representation.
 
-# Tried both scipy optimize and curve_fit, however, without the ability to set boundries, it is 
-# difficult to get reliable values out, and they seem to be very sensitive to the the initial values
+# Both the excl.reg and the straylight.reg files are assumed to be in a standard 4.0 file format with 3 lines dedicated to: format, global conditions, and coordinate system
+# It is also assumed that the only coordinate system used will be PHYSICAL. This is justified since the fitting is done on DET1 coordinate system with NuSTAR. 
+# Finally, each region within the file should be formated with parentheses and delimited with a comma; i.e, circle(100,100,20) 
 
-# Now I am going to try lmfit
-#  UPDATE:  
-#          I need to redesign the code to upload the exposure map, divide the exp_map by the exposure and create a mask out of it.  For
-#	   non excl.reg files it won't do anything really, but for those with, it will give the norm to the data file.
-#	   Also, redo the binning image to create and actual image.
-
-#  UPDATE 2:
-#          This copy is now for computing the norm associated with the observation of the Crab.  It entailes a semi circle of 
-#          strong stray light. The resulting image to be processed with be a background level image on dets 1,2 and the bright 
-#          image of the crab on dets 0,3. There is an excl reg that spans the transition of these two areas to avoid that kind
-#          of gradient. 
-
-
-# TO DO: 
-# DONE: [1] allow the submission of excl.reg files that can be used to create masked arrays. 
-# [2] fix the dets to one det and the rest be a ratio of that one. 
-# [3] allow for the forced change in that det above if the default is not ideal
-
+# It does not matter if the region is declared as an excluded or included region (signified with a - before the shape for DS9), the program only looks for keywords
 
 
 import os, sys, numpy as np
@@ -46,10 +30,12 @@ from scipy.stats import norm
 
 
 # Syntax: This should be ran from 
-#   count_stat_crab.py telescope[A/B] 
+#   count_stat_crab.py 
+#   telescope[A/B] 
 #   fits_file 
-#   lower_energy_limit 
-#   high_energy_limit observation_ID(7 digit) 
+#   lower_energy_limit        
+#   high_energy_limit         
+#   observation_ID(7 digit) 
 #   write_to_directory 
 #   Straylight_region(physical values assumed to have ds9 format) 
 #   reference_detector(0,1,2,3) 
@@ -123,8 +109,8 @@ def create_poly_mask(h,w,indicies):
     x,y = np.meshgrid(np.arange(h),np.arange(w))
     x,y = x.flatten(),y.flatten()
     points = np.vstack((x,y)).T
-    path = Path(coords)
-    grid = path.cointains_points(points)
+    pat = Path(coords)
+    grid = pat.contains_points(points)
     grid = grid.reshape((h,w))
     return grid
 
@@ -133,12 +119,33 @@ def create_ellipse_mask(h,w,centx,centy,dx,dy,rot):
     Y,X = np.ogrid[:h,:w]
     xp = (X-centx)*np.cos(rot)+(Y-centy)*np.sin(rot)
     yp = -(X-centx)*np.sin(rot)+(Y-centy)*np.cos(rot)
-    grid = (xp/dx)**2+(yp/y)**2 <= 1
+    grid = (xp/dx)**2+(yp/dy)**2 <= 1
     return grid
 
 
+def get_box_coords(centx,centy,width,height,rot):
+    # NOTE: This can be simplified with a simple rotation matrix, this is written out for debug
+    rtx = centx + ((width/2) * np.cos(rot)) - ((height/2) * np.sin(rot))
+    rty = centy + ((width/2) * np.sin(rot)) + ((height/2) * np.cos(rot))
+
+    ltx = centx - ((width/2) * np.cos(rot)) - ((height/2) * np.sin(rot))
+    lty = centy - ((width/2) * np.sin(rot)) + ((height/2) * np.cos(rot))
+
+    lbx = centx - ((width/2) * np.cos(rot)) + ((height/2) * np.sin(rot))
+    lby = centy - ((width/2) * np.sin(rot)) - ((height/2) * np.cos(rot))
+
+    rbx = centx + ((width/2) * np.cos(rot)) + ((height/2) * np.sin(rot))
+    rby = centy + ((width/2) * np.sin(rot)) - ((height/2) * np.cos(rot))
+    
+    coords = [rtx,rty,ltx,lty,lbx,lby,rbx,rby]
+    return coords
+
+
 #########################################
-# These are fitting parameters for the estimated det norm values
+# These are fitting parameters for the estimated det norm values established 
+# Through a stacked fitting of ~ 18Ms per telescope of filtered Occulted data
+# When NuSTAR was within Earth's shadow.
+
 aparams = np.array([[3.0344445961174137e-06, 0.49095924685628406, 3.2966298448587816e-08], \
     [2.8062974888119767e-06, 0.5112983664220534, 3.106952625755419e-08], \
     [4.400430023485417e-06, 0.5662638314570315, 3.859663516748116e-08], \
@@ -174,13 +181,40 @@ crab_mask = np.zeros((360,360))
 ##
 # It should be noted that only circular masking is possible, other shapes will need to be accounted
 # for if they are wanted (i.e., box, annulus, polygon, elipse (though this one may be difficult))
-for li in lin:
-    vals = li.split('(')[1]
-    vals = vals.split(')')[0]
-    X,Y,rad = vals.split(',')
-    mask = create_circular_mask(360,360,(float(X),float(Y)),float(rad))
-    crab_mask[~mask] = 1
 
+# STRAY LIGHT REGION 
+for li in lin:
+    temp_mask = np.zeros((360,360))
+    shape,vals = li.split('(')
+    #shape = vals[0]
+    vals = vals.split(')')[0]
+    if "circle" in shape:
+        X,Y,rad = vals.split(',')
+        mask = create_circular_mask(360,360,(float(X),float(Y)),float(rad))
+        #crab_mask[mask] = 0
+        temp_mask[mask] = 1
+    if 'polygon' in shape:
+        vals = vals.split(',')
+        vals = [float(i) for i in vals]
+        mask = create_poly_mask(360,360,vals)
+       #crab_mask[~mask] = 0
+        temp_mask[mask] = 1
+    if 'box' in shape:
+        # Box is given as X,Y, width, height, rotation
+        # create_box_mask will take it in this order
+        centx,centy, width, height, rot = vals.split(',')
+        val_2 = get_box_coords(float(centx),float(centy),float(width),float(height),float(rot))
+        mask = create_poly_mask(360,360,val_2)
+        temp_mask[mask] = 1
+    if 'ellipse' in shape:
+        X,Y,radx, rady, rotation = vals.split(',')
+        mask = create_ellipse_mask(360,360,float(X),float(Y),float(radx),float(rady),float(rotation))
+       #crab_mask[~mask] = 0
+        temp_mask[mask] = 1
+
+    crab_mask += temp_mask
+
+crab_mask[crab_mask > 0] = 1
 
 #with fits.open(homedir+'event_cl/crab'+detp+'.fits') as hdul:
 #  crab_mask = hdul[0].data
@@ -196,25 +230,36 @@ if len(sys.argv) > 9:
     trans_mask = np.ones((360,360))
 
     for li in lin:
-        vals = li.split('(')[1]
-        shape = vals[0]
+        temp_mask = np.ones((360,360))
+        shape, vals = li.split('(')
+        #shape = vals[0]
         vals = vals.split(')')[0]
         #X,Y,rad = vals.split(',')
         # Here would be the place to enter other shapes into the masking function
         # The shapes are circle, polygon, box, and ellipse
-        if shape == 'circle':
+        if 'circle' in shape:
             X,Y,rad = vals.split(',')
             mask = create_circular_mask(360,360,(float(X),float(Y)),float(rad))
-            trans_mask[~mask] = 0
-        if (shape == 'polygon') or (shape == 'box'):
+            temp_mask[mask] = 0
+        if 'polygon' in shape:
+            vals = vals.split(',')
+            vals = [float(i) for i in vals]
             mask = create_poly_mask(360,360,vals)
-            trans_mask[mask] = 0
-        if shape == 'ellipse':
+            temp_mask[mask] = 0
+        if 'box' in shape:
+            centx, centy, width, height, rot = vals.split(',')
+            val_2 = get_box_coords(float(centx), float(centy), float(width), float(height), float(rot))
+            mask = create_poly_mask(360,360,val_2)
+            temp_mask[mask] = 0
+        if 'ellipse' in shape:
             X,Y,radx,rady,rotation = vals.split(',')
             mask = create_ellipse_mask(360,360,float(X),float(Y),float(radx),float(rady),float(rotation))
-            trans_maks[mask] = 0
+            temp_mask[mask] = 0
+        trans_mask *= temp_mask
 
 
+else: 
+    trans_mask = np.ones((360,360))
 
 #with fits.open(homedir+'event_cl/mask'+detp+'.fits') as hdul:
 #  trans_mask = hdul[0].data
@@ -230,7 +275,7 @@ nusky_dir = '/uufs/astro.utah.edu/common/home/u1019304/my_idl/nuskybgd/auxil/'
 edge = '/uufs/astro.utah.edu/common/home/u1019304/temp/fullmask{}_final.fits'.format(detp)
 #edge = '/uufs/astro.utah.edu/common/home/u1019304/NuSTAR/auxil/fullmask'+detp+'.fits'
 #edgeB = '/uufs/astro.utah.edu/common/home/u1019304/NuSTAR/auxil/fullmaskB.fits'
-local_dir = '/uufs/astro.utah.edu/common/home/u1019304/NuSTAR/auxil/'
+#local_dir = '/uufs/astro.utah.edu/common/home/u1019304/NuSTAR/auxil/'
 orig_data = os.path.join(homedir,'nu{}{}01_cl.evt'.format(obsid,detp))
 # Load data
 with fits.open(orig_data) as exp:
@@ -267,6 +312,11 @@ eA_M = eA_M*eA
 ################################
 
 # fix the Aij, Bij arrays (note: both arrays still use variable Aij) 
+# The central position of the gradient was fixed here by analyzing the "best fit"
+# given by allowing this central postions to move. This position is degenerate 
+# to the gradient of the straylight model but the given position returned the 
+# the most stable position for a variety of tests.
+
 
 if detp == 'A':
   Aij = gradA[(int(len(gradA)/2) - 180) - (5 + offy):(int(len(gradA)/2) + 180) - (5 + offy), (int(len(gradA)/2) - 180) + (8 + offx):(int(len(gradA)/2) + 180) + (8 + offx)]*eA
@@ -296,6 +346,23 @@ a1 = np.zeros((360,360))
 a2 = np.zeros((360,360))
 a3 = np.zeros((360,360))
 Cn = np.copy(crab_mask)*eA
+
+#####
+### Here for testing the new masking ####
+#####
+# The masks were returned within expectations and allow for fitting of the
+# general shapes DS9 can create (circle, box, polygon, and ellipse). Any more
+# complicated shape will not be able to be fit
+
+#fits.writeto('Resultant_stray.fits',Cn)
+#fits.writeto('Resultant_excl.fits',eA_M)
+#test_result = Cn*eA_M
+#fits.writeto('Resultant_result.fits',test_result)
+#sys.exit()
+
+### End Test ############################
+
+
 
 a0[vA == 1]=1
 a1[vA == 2]=1
@@ -451,6 +518,7 @@ def getDetInit(tele,det,lener,hener):
     #    return quad(model_func,lener,hener,args=(aparams[det][0],aparams[det][1],aparams[det][2]))[0]
     #if tele == 'B':
     #    return quad(model_func,lener,hener,args=(bparams[det][0],bparams[det][1],bparams[det][2]))[0]
+# These values are the distilled values from the ~18Ms fit of occulted data
 
     if tele == 'A':
         if det == 0:
@@ -539,9 +607,6 @@ fit_params.add('det0', value=reference_val, min=(reference_val*0.0001))#, max=(r
 fit_params.add('crab', value=(det3_initval*20), min=0.0)
 
 
-
-
-
  #!!!!!!!!!!!!!!!!!#################!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 resA = minimize(fn, fit_params, method = 'nelder', tol=1e-15)
  #!!!!!!!!!!!!!!!!!################!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -590,6 +655,9 @@ with open(os.path.join(homedir,'{}_params.txt'.format(detp)), 'a+') as O:
 
 
 # From here is the error program, to use it needs to be uncommented and fixed a bit.
+# HOWEVER, given that this program will be used to only measure a single observation, it is NOT adivised that this error analysis be used. The log liklihood used to fit the data is based on the Cash statistic which is Poissonian by nature and only when the data points are >> then those found within a single observation does a 1-sigma error make sense. If errors are needed, a new routine should be used. If you do have a large collection of data, then this brute force method has shown to be robust and reliable, but slow. 
+
+
 
 ##def gaussian(x, a, b, c):
 ##    return a*np.exp(-np.power(x - b, 2)/(2*np.power(c, 2)))
