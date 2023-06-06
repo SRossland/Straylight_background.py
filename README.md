@@ -13,11 +13,11 @@ NOTE:
 # Before this code can be run, certain absolute paths must be updated:
 
 # line 1: (OPTIONAL) If you require the use of the shebang, this will have to changed to something appropriate to you, i.e., #!/usr/bin/env python3
-# line 229: nusky_dir --> This path points to the auxil directory within nuskybgd
-# line 230: edge --> This path points to the mask fits file that is given in this hub, fullmask[A/B]__final.fits
-# line 239: detmap[A/B].fits. This file is given in this hub, just need to have the path point to where you store it
-# line 251: pixmap[A/B].fits. This file is given in this hub, it is ALSO given in the nuskybgd auxil, however, this one is more up-to-date
-# line 493: normmeanvals.txt. This file is given in this hub and contains an initial value for norm fitting. This could be changed in the future.
+# line 274: nusky_dir --> This path points to the auxil directory within nuskybgd
+# line 275: edge --> This path points to the mask fits file that is given in this hub, fullmask[A/B]__final.fits
+# line 284: detmap[A/B].fits. This file is given in this hub, just need to have the path point to where you store it
+# line 296: pixmap[A/B].fits. This file is given in this hub, it is ALSO given in the nuskybgd auxil, however, this one is more up-to-date
+# line 561: normmeanvals.txt. This file is given in this hub and contains an initial value for norm fitting. This could be changed in the future.
 ==============================================
 # There is an extra file you may need if you do not have nuskbgd locally (which is what the nusky_dir path is there for). det[A/B]_det1.img
 ==============================================
